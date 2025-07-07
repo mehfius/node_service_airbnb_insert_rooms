@@ -9,7 +9,7 @@ async function main() {
 
     const scrapeRoomEndpoint = process.env.SCRAPE_URL;
 
-    const concurrencyLimit = 1;
+    const concurrencyLimit = 3;
 
     const startTime = Date.now();
 
@@ -38,7 +38,7 @@ async function main() {
 
             const promises = batch.map(async (entry) => {
                 const currentRoomId = String(entry.room);
-                let payloadToUpsert = { id: currentRoomId, failed: true };
+                let payloadToUpsert = {}; // Inicializa vazio, será preenchido apenas no sucesso
 
                 try {
                     const scrapeResponse = await fetch(scrapeRoomEndpoint, {
@@ -58,27 +58,26 @@ async function main() {
                     payloadToUpsert.id = currentRoomId;
                     payloadToUpsert.failed = false;
 
-                    console.log(`\x1b[34mProcessando room ${currentRoomId} - Payload para upsert: ${JSON.stringify(payloadToUpsert)}\x1b[0m`);
+                    console.log(`\x1b[34mProcessando room ${currentRoomId} - Payload para upsert: ${payloadToUpsert.title}\x1b[0m`);
 
-                } catch (error) {
-                    console.error(`\x1b[31mErro no scrape ou preparação para room ${currentRoomId}: ${error.message}\x1b[0m`);
-                } finally {
+                    // UPSERT MOVIDO PARA AQUI - APENAS SE O SCRAPE FOR BEM-SUCEDIDO
                     const { error: upsertError } = await supabase
                         .from('rooms')
                         .upsert(payloadToUpsert, { onConflict: 'id', ignoreDuplicates: false });
 
                     if (upsertError) {
-                        console.error(`\x1b[31mErro final no upsert para room ${currentRoomId}: ${upsertError.message}\x1b[0m`);
+                        console.error(`\x1b[31mErro no upsert para room ${currentRoomId}: ${upsertError.message}\x1b[0m`);
                         return { status: 'rejected', roomId: currentRoomId, reason: upsertError.message };
                     }
 
-                    if (payloadToUpsert.failed) {
-                        console.log(`\x1b[33mRoom ${currentRoomId} marcada como falha no DB.\x1b[0m`);
-                    } else {
-                        console.log(`\x1b[32mRoom ${currentRoomId} processada com sucesso.\x1b[0m`);
-                    }
+                    console.log(`\x1b[32mRoom ${currentRoomId} processada com sucesso.\x1b[0m`);
                     processedCount++;
                     return { status: 'fulfilled', roomId: currentRoomId };
+
+                } catch (error) {
+                    console.error(`\x1b[31mErro no scrape ou upsert para room ${currentRoomId}: ${error.message}\x1b[0m`);
+                    // NENHUM UPSERT OCORRE SE HOUVER ERRO AQUI
+                    return { status: 'rejected', roomId: currentRoomId, reason: error.message };
                 }
             });
 
